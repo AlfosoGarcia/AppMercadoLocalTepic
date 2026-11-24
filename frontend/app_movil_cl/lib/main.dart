@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'login_screen.dart';
+import 'registro_screen.dart';
 import 'cliente_screen.dart';
 import 'comerciante_screen.dart';
 import 'repartidor_screen.dart';
@@ -19,9 +21,11 @@ class MercadoLocalApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
         useMaterial3: true,
       ),
-      initialRoute: '/',
+      initialRoute: '/login',
       routes: {
-        '/': (context) => const RolSelectorScreen(),
+        '/login': (context) => const LoginScreen(),
+        '/registro': (context) => const RegistroScreen(),
+        '/roles': (context) => const RolSelectorScreen(),
         '/cliente': (context) => const ClienteScreen(),
         '/comerciante': (context) => const ComercianteScreen(),
         '/repartidor': (context) => const RepartidorScreen(),
@@ -95,10 +99,9 @@ class RolSelectorScreen extends StatelessWidget {
       backgroundColor: Colors.grey.shade100,
       appBar: AppBar(
         title: const Text(
-          'Mercado Local Tepic',
+          'Selector Rápido (Demo)',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        centerTitle: true,
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
       ),
@@ -110,28 +113,10 @@ class RolSelectorScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(
-                  Icons.store_mall_directory,
-                  size: 64,
-                  color: Colors.green,
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Selecciona tu perfil',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Comercio local con entrega a domicilio y pago en efectivo',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
-                ),
-                const SizedBox(height: 28),
                 _construirTarjetaRol(
                   context: context,
                   titulo: 'Soy Cliente',
-                  subtitulo: 'Explora productos locales y pide a domicilio',
+                  subtitulo: 'Explora productos locales y sigue tus pedidos',
                   icono: Icons.shopping_bag_outlined,
                   colorIcono: Colors.green.shade700,
                   colorFondoIcono: Colors.green.shade50,

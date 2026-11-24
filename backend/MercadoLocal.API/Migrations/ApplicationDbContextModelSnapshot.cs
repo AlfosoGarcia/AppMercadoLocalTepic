@@ -33,7 +33,14 @@ namespace MercadoLocal.API.Migrations
                     b.Property<int>("Cantidad")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("ComercianteId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("NombreProducto")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("NombreTienda")
                         .IsRequired()
                         .HasColumnType("text");
 
@@ -61,6 +68,9 @@ namespace MercadoLocal.API.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("ClienteId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ClienteNombre")
                         .IsRequired()
                         .HasColumnType("text");
@@ -73,8 +83,14 @@ namespace MercadoLocal.API.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<DateTime>("FechaPedido")
+                    b.Property<DateTime>("FechaCreacion")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("RepartidorId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RepartidorNombre")
+                        .HasColumnType("text");
 
                     b.Property<string>("Telefono")
                         .IsRequired()
@@ -96,17 +112,18 @@ namespace MercadoLocal.API.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("ComercianteId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Descripcion")
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<bool>("Disponible")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTime>("FechaCreacion")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("Nombre")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("NombreTienda")
                         .IsRequired()
                         .HasColumnType("text");
 
@@ -155,13 +172,11 @@ namespace MercadoLocal.API.Migrations
 
             modelBuilder.Entity("MercadoLocal.API.Models.DetallePedido", b =>
                 {
-                    b.HasOne("MercadoLocal.API.Models.Pedido", "Pedido")
+                    b.HasOne("MercadoLocal.API.Models.Pedido", null)
                         .WithMany("Detalles")
                         .HasForeignKey("PedidoId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("Pedido");
                 });
 
             modelBuilder.Entity("MercadoLocal.API.Models.Pedido", b =>

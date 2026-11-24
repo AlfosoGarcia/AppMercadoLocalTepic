@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'sesion_actual.dart';
 
 class ClienteScreen extends StatefulWidget {
   const ClienteScreen({super.key});
@@ -9,25 +10,39 @@ class ClienteScreen extends StatefulWidget {
   State<ClienteScreen> createState() => _ClienteScreenState();
 }
 
-class _ClienteScreenState extends State<ClienteScreen> {
+class _ClienteScreenState extends State<ClienteScreen>
+    with SingleTickerProviderStateMixin {
   static const String baseUrl = 'http://localhost:5002/api';
 
-  List<dynamic> productos = [];
-  bool cargando = true;
-  String? errorMensaje;
+  late TabController _tabController;
 
+  List<dynamic> productos = [];
+  bool cargandoProductos = true;
+  String? errorProductos;
   final Map<int, Map<String, dynamic>> carrito = {};
+
+  List<dynamic> misPedidos = [];
+  bool cargandoPedidos = true;
+  String? errorPedidos;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     obtenerProductos();
+    obtenerMisPedidos();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> obtenerProductos() async {
     setState(() {
-      cargando = true;
-      errorMensaje = null;
+      cargandoProductos = true;
+      errorProductos = null;
     });
 
     try {
@@ -36,18 +51,49 @@ class _ClienteScreenState extends State<ClienteScreen> {
       if (response.statusCode == 200) {
         setState(() {
           productos = json.decode(response.body);
-          cargando = false;
+          cargandoProductos = false;
         });
       } else {
         setState(() {
-          errorMensaje = 'Error del servidor: ${response.statusCode}';
-          cargando = false;
+          errorProductos = 'Error del servidor: ${response.statusCode}';
+          cargandoProductos = false;
         });
       }
     } catch (e) {
       setState(() {
-        errorMensaje = 'No se pudo conectar con la API en localhost:5002';
-        cargando = false;
+        errorProductos = 'No se pudo conectar con la API en localhost:5002';
+        cargandoProductos = false;
+      });
+    }
+  }
+
+  Future<void> obtenerMisPedidos() async {
+    setState(() {
+      cargandoPedidos = true;
+      errorPedidos = null;
+    });
+
+    try {
+      final String queryParam = SesionActual.usuarioId != null
+          ? '?clienteId=${SesionActual.usuarioId}'
+          : '';
+      final response = await http.get(Uri.parse('$baseUrl/pedidos$queryParam'));
+
+      if (response.statusCode == 200) {
+        setState(() {
+          misPedidos = json.decode(response.body);
+          cargandoPedidos = false;
+        });
+      } else {
+        setState(() {
+          errorPedidos = 'Error del servidor: ${response.statusCode}';
+          cargandoPedidos = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        errorPedidos = 'No se pudo conectar con la API en localhost:5002';
+        cargandoPedidos = false;
       });
     }
   }
@@ -111,7 +157,8 @@ class _ClienteScreenState extends State<ClienteScreen> {
 
   void mostrarResumenCarrito() {
     final formKey = GlobalKey<FormState>();
-    final nombreController = TextEditingController();
+    final nombreController =
+        TextEditingController(text: SesionActual.nombre ?? '');
     final direccionController = TextEditingController();
     final telefonoController = TextEditingController();
 
@@ -140,6 +187,7 @@ class _ClienteScreenState extends State<ClienteScreen> {
               final double montoFinal = totalPagar;
 
               final payload = {
+                'clienteId': SesionActual.usuarioId,
                 'clienteNombre': nombreController.text.trim(),
                 'direccionEntrega': direccionController.text.trim(),
                 'telefono': telefonoController.text.trim(),
@@ -171,6 +219,8 @@ class _ClienteScreenState extends State<ClienteScreen> {
                   });
 
                   await obtenerProductos();
+                  await obtenerMisPedidos();
+                  _tabController.animateTo(1);
 
                   if (mounted) {
                     ScaffoldMessenger.of(this.context).showSnackBar(
@@ -250,6 +300,8 @@ class _ClienteScreenState extends State<ClienteScreen> {
                             final double precio =
                                 (prod['precio'] as num).toDouble();
                             final double subtotal = precio * cant;
+                            final String tienda =
+                                prod['nombreTienda'] ?? 'Tienda Local';
 
                             return ListTile(
                               contentPadding: EdgeInsets.zero,
@@ -260,7 +312,7 @@ class _ClienteScreenState extends State<ClienteScreen> {
                                     fontWeight: FontWeight.w600),
                               ),
                               subtitle: Text(
-                                '\$${precio.toStringAsFixed(2)} c/u  •  Subtotal: \$${subtotal.toStringAsFixed(2)}',
+                                '$tienda • \$${precio.toStringAsFixed(2)} c/u • Subtotal: \$${subtotal.toStringAsFixed(2)}',
                               ),
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -439,20 +491,432 @@ class _ClienteScreenState extends State<ClienteScreen> {
     );
   }
 
+  Widget _construirItemProducto(dynamic prod) {
+    final int id = prod['id'];
+    final double precio = (prod['precio'] as num).toDouble();
+    final int stock = prod['stock'] ?? 0;
+    final int cantidadEnCarrito =
+        carrito.containsKey(id) ? carrito[id]!['cantidad'] : 0;
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: Colors.grey.shade200),
+        ),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 6,
+        ),
+        leading: Icon(
+          Icons.shopping_bag_outlined,
+          color: Colors.green.shade700,
+          size: 28,
+        ),
+        title: Text(
+          prod['nombre'],
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if ((prod['descripcion'] ?? '').toString().isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(prod['descripcion']),
+            ],
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Text(
+                  '\$${precio.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    color: Colors.green,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  stock > 0 ? 'Stock: $stock' : 'Agotado',
+                  style: TextStyle(
+                    color: stock > 0 ? Colors.grey[700] : Colors.red,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        trailing: stock == 0
+            ? const Chip(label: Text('Sin stock'))
+            : cantidadEnCarrito == 0
+                ? ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: () => agregarAlCarrito(prod),
+                    child: const Text('+ Agregar'),
+                  )
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(
+                          Icons.remove_circle_outline,
+                          color: Colors.red,
+                        ),
+                        onPressed: () => quitarDelCarrito(id),
+                      ),
+                      Text(
+                        '$cantidadEnCarrito',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.add_circle_outline,
+                          color: Colors.green,
+                        ),
+                        onPressed: () => agregarAlCarrito(prod),
+                      ),
+                    ],
+                  ),
+      ),
+    );
+  }
+
+  Widget _construirTabCatalogo() {
+    if (cargandoProductos) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (errorProductos != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(errorProductos!, style: const TextStyle(color: Colors.red)),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: obtenerProductos,
+              child: const Text('Reintentar'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (productos.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.storefront_outlined,
+              size: 64,
+              color: Colors.grey.shade400,
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'No hay productos disponibles por el momento',
+              style: TextStyle(fontSize: 16, color: Colors.grey),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Agrupar productos por tienda
+    final Map<String, Map<String, dynamic>> tiendasMap = {};
+    for (final prod in productos) {
+      final String nombreTienda =
+          (prod['nombreTienda'] ?? 'Tienda Local').toString().trim();
+      final String tiendaVisible =
+          nombreTienda.isEmpty ? 'Tienda Local' : nombreTienda;
+      final String claveTienda =
+          '${prod['comercianteId'] ?? 'general'}_$tiendaVisible';
+
+      if (!tiendasMap.containsKey(claveTienda)) {
+        tiendasMap[claveTienda] = {
+          'nombreTienda': tiendaVisible,
+          'productos': <dynamic>[],
+        };
+      }
+      (tiendasMap[claveTienda]!['productos'] as List<dynamic>).add(prod);
+    }
+
+    final listaTiendas = tiendasMap.values.toList();
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: listaTiendas.length,
+      itemBuilder: (context, index) {
+        final tienda = listaTiendas[index];
+        final String nombreTienda = tienda['nombreTienda'];
+        final List<dynamic> productosTienda = tienda['productos'];
+
+        return Card(
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: ExpansionTile(
+            initiallyExpanded: true,
+            backgroundColor: Colors.white,
+            collapsedBackgroundColor: Colors.green.shade50,
+            leading: CircleAvatar(
+              backgroundColor: Colors.green.shade100,
+              child: Icon(
+                Icons.storefront,
+                color: Colors.green.shade800,
+              ),
+            ),
+            title: Text(
+              nombreTienda,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 17,
+              ),
+            ),
+            subtitle: Text(
+              '${productosTienda.length} ${productosTienda.length == 1 ? 'producto disponible' : 'productos disponibles'}',
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey.shade700,
+              ),
+            ),
+            children: productosTienda.map((prod) {
+              return _construirItemProducto(prod);
+            }).toList(),
+          ),
+        );
+      },
+    );
+  }
+
+  int _pasoActualPedido(String estado) {
+    if (estado == 'Entregado y Pagado') return 3;
+    if (estado == 'Listo para envío') return 2;
+    return 1;
+  }
+
+  Widget _construirIndicadorPaso(
+      String etiqueta, int numeroPaso, int pasoActual) {
+    final bool completado = pasoActual >= numeroPaso;
+    return Expanded(
+      child: Column(
+        children: [
+          Container(
+            height: 6,
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            decoration: BoxDecoration(
+              color: completado ? Colors.green : Colors.grey.shade300,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            etiqueta,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: completado ? FontWeight.bold : FontWeight.normal,
+              color: completado ? Colors.green.shade800 : Colors.grey,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _construirTabMisPedidos() {
+    if (cargandoPedidos) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (errorPedidos != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(errorPedidos!, style: const TextStyle(color: Colors.red)),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: obtenerMisPedidos,
+              child: const Text('Reintentar'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (misPedidos.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.receipt_long, size: 64, color: Colors.grey.shade400),
+            const SizedBox(height: 12),
+            const Text(
+              'Aún no has realizado pedidos con esta cuenta',
+              style: TextStyle(fontSize: 16, color: Colors.grey),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: misPedidos.length,
+      itemBuilder: (context, index) {
+        final pedido = misPedidos[index];
+        final int id = pedido['id'] ?? 0;
+        final String cliente = pedido['clienteNombre'] ?? 'Cliente';
+        final String direccion = pedido['direccionEntrega'] ?? '';
+        final String estado = pedido['estado'] ?? 'Pendiente';
+        final double total = (pedido['total'] as num?)?.toDouble() ?? 0.0;
+        final List<dynamic> detalles = pedido['detalles'] ?? [];
+        final int pasoActual = _pasoActualPedido(estado);
+
+        Color colorEstado = Colors.orange.shade800;
+        Color fondoEstado = Colors.orange.shade100;
+        if (estado == 'Listo para envío') {
+          colorEstado = Colors.blue.shade800;
+          fondoEstado = Colors.blue.shade100;
+        } else if (estado == 'Entregado y Pagado') {
+          colorEstado = Colors.green.shade800;
+          fondoEstado = Colors.green.shade100;
+        }
+
+        return Card(
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Pedido #$id',
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: fondoEstado,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        estado,
+                        style: TextStyle(
+                          color: colorEstado,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    _construirIndicadorPaso('1. Recibido', 1, pasoActual),
+                    _construirIndicadorPaso('2. En camino', 2, pasoActual),
+                    _construirIndicadorPaso('3. Entregado', 3, pasoActual),
+                  ],
+                ),
+                const Divider(height: 20),
+                Text(
+                  'Entrega a: $cliente ($direccion)',
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                ),
+                if (pedido['repartidorNombre'] != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Repartidor asignado: ${pedido['repartidorNombre']}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.teal.shade800,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 6),
+                ...detalles.map((det) {
+                  final tiendaItem = det['nombreTienda'] ?? 'Tienda Local';
+                  return Text(
+                    '• ${det['cantidad']} x ${det['nombreProducto']} ($tiendaItem)',
+                    style: const TextStyle(fontSize: 14),
+                  );
+                }),
+                const Divider(),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      estado == 'Entregado y Pagado'
+                          ? 'Pagado en efectivo:'
+                          : 'A pagar en efectivo:',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    Text(
+                      '\$${total.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final String tituloAppBar = SesionActual.nombre != null
+        ? 'Hola, ${SesionActual.nombre}'
+        : 'Tienda Local Tepic';
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Tienda Local Tepic',
-          style: TextStyle(fontWeight: FontWeight.bold),
+        title: Text(
+          tituloAppBar,
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
         actions: [
           IconButton(
-            tooltip: 'Actualizar catálogo',
-            onPressed: obtenerProductos,
+            tooltip: 'Actualizar',
+            onPressed: () {
+              obtenerProductos();
+              obtenerMisPedidos();
+            },
             icon: const Icon(Icons.refresh),
           ),
           IconButton(
@@ -464,119 +928,40 @@ class _ClienteScreenState extends State<ClienteScreen> {
               child: const Icon(Icons.shopping_cart),
             ),
           ),
+          IconButton(
+            tooltip: 'Cerrar sesión',
+            onPressed: () {
+              SesionActual.cerrar();
+              Navigator.pushReplacementNamed(context, '/login');
+            },
+            icon: const Icon(Icons.logout),
+          ),
           const SizedBox(width: 8),
         ],
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          indicatorColor: Colors.white,
+          tabs: [
+            const Tab(
+              icon: Icon(Icons.storefront),
+              text: 'Tiendas',
+            ),
+            Tab(
+              icon: const Icon(Icons.local_shipping_outlined),
+              text: 'Mis Pedidos (${misPedidos.length})',
+            ),
+          ],
+        ),
       ),
-      body: cargando
-          ? const Center(child: CircularProgressIndicator())
-          : errorMensaje != null
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(errorMensaje!,
-                          style: const TextStyle(color: Colors.red)),
-                      const SizedBox(height: 12),
-                      ElevatedButton(
-                        onPressed: obtenerProductos,
-                        child: const Text('Reintentar'),
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: productos.length,
-                  itemBuilder: (context, index) {
-                    final prod = productos[index];
-                    final int id = prod['id'];
-                    final double precio = (prod['precio'] as num).toDouble();
-                    final int stock = prod['stock'] ?? 0;
-                    final int cantidadEnCarrito =
-                        carrito.containsKey(id) ? carrito[id]!['cantidad'] : 0;
-
-                    return Card(
-                      elevation: 1,
-                      margin: const EdgeInsets.only(bottom: 10),
-                      child: ListTile(
-                        leading: const Icon(
-                          Icons.shopping_bag,
-                          color: Colors.green,
-                          size: 32,
-                        ),
-                        title: Text(
-                          prod['nombre'],
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(prod['descripcion'] ?? ''),
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                Text(
-                                  '\$${precio.toStringAsFixed(2)}',
-                                  style: const TextStyle(
-                                    color: Colors.green,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  stock > 0 ? 'Stock: $stock' : 'Agotado',
-                                  style: TextStyle(
-                                    color:
-                                        stock > 0 ? Colors.grey[700] : Colors.red,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        trailing: stock == 0
-                            ? const Chip(label: Text('Sin stock'))
-                            : cantidadEnCarrito == 0
-                                ? ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.green,
-                                      foregroundColor: Colors.white,
-                                    ),
-                                    onPressed: () => agregarAlCarrito(prod),
-                                    child: const Text('+ Agregar'),
-                                  )
-                                : Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        icon: const Icon(
-                                          Icons.remove_circle_outline,
-                                          color: Colors.red,
-                                        ),
-                                        onPressed: () => quitarDelCarrito(id),
-                                      ),
-                                      Text(
-                                        '$cantidadEnCarrito',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 16,
-                                        ),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(
-                                          Icons.add_circle_outline,
-                                          color: Colors.green,
-                                        ),
-                                        onPressed: () => agregarAlCarrito(prod),
-                                      ),
-                                    ],
-                                  ),
-                      ),
-                    );
-                  },
-                ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _construirTabCatalogo(),
+          _construirTabMisPedidos(),
+        ],
+      ),
       bottomNavigationBar: carrito.isEmpty
           ? null
           : Container(

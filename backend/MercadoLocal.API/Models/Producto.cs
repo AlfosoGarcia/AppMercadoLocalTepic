@@ -7,7 +7,8 @@ namespace MercadoLocal.API.Models
         public string Descripcion { get; set; } = string.Empty;
         public decimal Precio { get; set; }
         public int Stock { get; set; }
-        public bool Disponible { get; set; } = true;
-        public DateTime FechaCreacion { get; set; } = DateTime.UtcNow;
+
+        public int? ComercianteId { get; set; }
+        public string NombreTienda { get; set; } = "Tienda Local";
     }
 }

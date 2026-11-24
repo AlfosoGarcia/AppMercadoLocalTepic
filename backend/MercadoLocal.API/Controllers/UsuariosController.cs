@@ -2,12 +2,11 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MercadoLocal.API.Data;
 using MercadoLocal.API.Models;
-using MercadoLocal.API.DTOs;
 
 namespace MercadoLocal.API.Controllers
 {
-    [ApiController]
     [Route("api/[controller]")]
+    [ApiController]
     public class UsuariosController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
@@ -17,34 +16,83 @@ namespace MercadoLocal.API.Controllers
             _context = context;
         }
 
+        // POST: api/usuarios/registro
         [HttpPost("registro")]
-        public async Task<IActionResult> Registrar(RegistroDto dto)
+        public async Task<IActionResult> Registrar([FromBody] RegistroUsuarioDto dto)
         {
-            // Validar si el correo ya existe
-            if (await _context.Usuarios.AnyAsync(u => u.Email == dto.Email))
+            if (string.IsNullOrWhiteSpace(dto.Nombre) ||
+                string.IsNullOrWhiteSpace(dto.Email) ||
+                string.IsNullOrWhiteSpace(dto.Password))
             {
-                return BadRequest(new { mensaje = "El correo electrónico ya está registrado." });
+                return BadRequest("Todos los campos son obligatorios.");
             }
 
-            // Crear el nuevo usuario (Por ahora guardamos el texto plano, luego agregaremos hash seguro)
-            var usuario = new Usuario
+            var emailNormalizado = dto.Email.Trim().ToLower();
+            var existe = await _context.Usuarios.AnyAsync(u => u.Email == emailNormalizado);
+            if (existe)
             {
-                Nombre = dto.Nombre,
-                Email = dto.Email,
-                PasswordHash = dto.Password, 
-                Rol = dto.Rol
+                return BadRequest("Este correo ya está registrado.");
+            }
+
+            var rolesValidos = new[] { "Cliente", "Comerciante", "Repartidor" };
+            var rolAsignado = rolesValidos.Contains(dto.Rol) ? dto.Rol : "Cliente";
+
+            var nuevoUsuario = new Usuario
+            {
+                Nombre = dto.Nombre.Trim(),
+                Email = emailNormalizado,
+                PasswordHash = dto.Password.Trim(),
+                Rol = rolAsignado
             };
 
-            _context.Usuarios.Add(usuario);
+            _context.Usuarios.Add(nuevoUsuario);
             await _context.SaveChangesAsync();
 
-            return Ok(new { mensaje = "Usuario registrado exitosamente.", usuarioId = usuario.Id });
+            return Ok(new
+            {
+                mensaje = "Usuario registrado con éxito",
+                id = nuevoUsuario.Id,
+                nombre = nuevoUsuario.Nombre,
+                email = nuevoUsuario.Email,
+                rol = nuevoUsuario.Rol
+            });
         }
 
-        [HttpGet]
-        public async Task<ActionResult<IEnumerable<Usuario>>> ObtenerUsuarios()
+        // POST: api/usuarios/login
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] LoginUsuarioDto dto)
         {
-            return await _context.Usuarios.ToListAsync();
+            var emailNormalizado = dto.Email.Trim().ToLower();
+            var usuario = await _context.Usuarios
+                .FirstOrDefaultAsync(u => u.Email == emailNormalizado && u.PasswordHash == dto.Password.Trim());
+
+            if (usuario == null)
+            {
+                return Unauthorized("Correo o contraseña incorrectos.");
+            }
+
+            return Ok(new
+            {
+                mensaje = "Inicio de sesión exitoso",
+                id = usuario.Id,
+                nombre = usuario.Nombre,
+                email = usuario.Email,
+                rol = usuario.Rol
+            });
         }
+    }
+
+    public class RegistroUsuarioDto
+    {
+        public string Nombre { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        public string Rol { get; set; } = "Cliente";
+    }
+
+    public class LoginUsuarioDto
+    {
+        public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
     }
 }

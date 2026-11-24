@@ -9,7 +9,6 @@ namespace MercadoLocal.API.Controllers
     [ApiController]
     public class PedidosController : ControllerBase
     {
-        // <-- Verifica que aquí diga el nombre de tu Contexto (ej. ApplicationDbContext o AppDbContext)
         private readonly ApplicationDbContext _context;
 
         public PedidosController(ApplicationDbContext context)
@@ -17,32 +16,89 @@ namespace MercadoLocal.API.Controllers
             _context = context;
         }
 
-        // GET: api/pedidos
+        // GET: api/pedidos?clienteId=1&comercianteId=2&repartidorId=3
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<Pedido>>> GetPedidos()
+        public async Task<IActionResult> GetPedidos(
+            [FromQuery] int? clienteId,
+            [FromQuery] int? comercianteId,
+            [FromQuery] int? repartidorId)
         {
-            return await _context.Pedidos
+            var query = _context.Pedidos
                 .Include(p => p.Detalles)
-                .OrderByDescending(p => p.FechaPedido)
-                .ToListAsync();
+                .AsQueryable();
+
+            if (clienteId.HasValue)
+            {
+                query = query.Where(p => p.ClienteId == clienteId.Value);
+            }
+
+            if (comercianteId.HasValue)
+            {
+                query = query.Where(p => p.Detalles.Any(d => d.ComercianteId == comercianteId.Value));
+            }
+
+            if (repartidorId.HasValue)
+            {
+                query = query.Where(p =>
+                    (p.Estado == "Listo para envío" && (p.RepartidorId == null || p.RepartidorId == repartidorId.Value)) ||
+                    (p.Estado == "Entregado y Pagado" && p.RepartidorId == repartidorId.Value));
+            }
+
+            var lista = await query.OrderByDescending(p => p.Id).ToListAsync();
+
+            var resultado = lista.Select(p =>
+            {
+                var detallesFiltrados = comercianteId.HasValue
+                    ? p.Detalles.Where(d => d.ComercianteId == comercianteId.Value).ToList()
+                    : p.Detalles.ToList();
+
+                var totalMostrar = comercianteId.HasValue
+                    ? detallesFiltrados.Sum(d => d.PrecioUnitario * d.Cantidad)
+                    : p.Total;
+
+                return new
+                {
+                    id = p.Id,
+                    clienteId = p.ClienteId,
+                    clienteNombre = p.ClienteNombre,
+                    direccionEntrega = p.DireccionEntrega,
+                    telefono = p.Telefono,
+                    estado = p.Estado,
+                    total = totalMostrar,
+                    repartidorId = p.RepartidorId,
+                    repartidorNombre = p.RepartidorNombre,
+                    detalles = detallesFiltrados.Select(d => new
+                    {
+                        id = d.Id,
+                        productoId = d.ProductoId,
+                        nombreProducto = d.NombreProducto,
+                        cantidad = d.Cantidad,
+                        precioUnitario = d.PrecioUnitario,
+                        nombreTienda = d.NombreTienda
+                    })
+                };
+            });
+
+            return Ok(resultado);
         }
 
         // POST: api/pedidos
         [HttpPost]
-        public async Task<ActionResult<Pedido>> CrearPedido([FromBody] CrearPedidoDto dto)
+        public async Task<IActionResult> CrearPedido([FromBody] CrearPedidoDto dto)
         {
-            if (dto.Items == null || dto.Items.Count == 0)
+            if (dto.Items == null || !dto.Items.Any())
             {
-                return BadRequest("El carrito está vacío.");
+                return BadRequest("El pedido debe incluir al menos un producto.");
             }
 
-            var nuevoPedido = new Pedido
+            var pedido = new Pedido
             {
-                ClienteNombre = dto.ClienteNombre,
-                DireccionEntrega = dto.DireccionEntrega,
-                Telefono = dto.Telefono,
-                FechaPedido = DateTime.UtcNow,
-                Estado = "Pendiente"
+                ClienteId = dto.ClienteId,
+                ClienteNombre = dto.ClienteNombre.Trim(),
+                DireccionEntrega = dto.DireccionEntrega.Trim(),
+                Telefono = dto.Telefono.Trim(),
+                Estado = "Pendiente",
+                FechaCreacion = DateTime.UtcNow
             };
 
             decimal totalCalculado = 0;
@@ -52,7 +108,7 @@ namespace MercadoLocal.API.Controllers
                 var producto = await _context.Productos.FindAsync(item.ProductoId);
                 if (producto == null)
                 {
-                    return NotFound($"Producto con ID {item.ProductoId} no encontrado.");
+                    return BadRequest($"El producto con ID {item.ProductoId} no existe.");
                 }
 
                 if (producto.Stock < item.Cantidad)
@@ -67,55 +123,67 @@ namespace MercadoLocal.API.Controllers
                     ProductoId = producto.Id,
                     NombreProducto = producto.Nombre,
                     Cantidad = item.Cantidad,
-                    PrecioUnitario = producto.Precio
+                    PrecioUnitario = producto.Precio,
+                    ComercianteId = producto.ComercianteId,
+                    NombreTienda = producto.NombreTienda
                 };
 
                 totalCalculado += producto.Precio * item.Cantidad;
-                nuevoPedido.Detalles.Add(detalle);
+                pedido.Detalles.Add(detalle);
             }
 
-            nuevoPedido.Total = totalCalculado;
+            pedido.Total = totalCalculado;
 
-            _context.Pedidos.Add(nuevoPedido);
+            _context.Pedidos.Add(pedido);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetPedidos), new { id = nuevoPedido.Id }, new
+            return Ok(new
             {
-                mensaje = "Pedido registrado con éxito",
-                pedidoId = nuevoPedido.Id,
-                total = nuevoPedido.Total
+                mensaje = "Pedido registrado correctamente",
+                pedidoId = pedido.Id
             });
         }
 
         // PUT: api/pedidos/5/estado
         [HttpPut("{id}/estado")]
-        public async Task<IActionResult> ActualizarEstado(int id, [FromBody] ActualizarEstadoDto dto)
+        public async Task<IActionResult> ActualizarEstado(int id, [FromBody] ActualizarEstadoPedidoDto dto)
         {
             var pedido = await _context.Pedidos.FindAsync(id);
             if (pedido == null)
             {
-                return NotFound($"Pedido con ID {id} no encontrado.");
+                return NotFound("Pedido no encontrado.");
             }
 
-            if (string.IsNullOrWhiteSpace(dto.NuevoEstado))
+            if (dto.RepartidorId.HasValue)
             {
-                return BadRequest("El nuevo estado es obligatorio.");
+                if (pedido.RepartidorId.HasValue && pedido.RepartidorId != dto.RepartidorId)
+                {
+                    return BadRequest("Este pedido ya fue tomado por otro repartidor.");
+                }
+                pedido.RepartidorId = dto.RepartidorId;
+                pedido.RepartidorNombre = dto.RepartidorNombre;
             }
 
-            pedido.Estado = dto.NuevoEstado.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.Estado))
+            {
+                pedido.Estado = dto.Estado.Trim();
+            }
+
             await _context.SaveChangesAsync();
 
             return Ok(new
             {
-                mensaje = $"Estado actualizado a {pedido.Estado}",
-                pedidoId = pedido.Id,
-                estado = pedido.Estado
+                mensaje = "Estado actualizado",
+                id = pedido.Id,
+                estado = pedido.Estado,
+                repartidorId = pedido.RepartidorId
             });
         }
     }
 
     public class CrearPedidoDto
     {
+        public int? ClienteId { get; set; }
         public string ClienteNombre { get; set; } = string.Empty;
         public string DireccionEntrega { get; set; } = string.Empty;
         public string Telefono { get; set; } = string.Empty;
@@ -128,8 +196,10 @@ namespace MercadoLocal.API.Controllers
         public int Cantidad { get; set; }
     }
 
-    public class ActualizarEstadoDto
+    public class ActualizarEstadoPedidoDto
     {
-        public string NuevoEstado { get; set; } = string.Empty;
+        public string Estado { get; set; } = string.Empty;
+        public int? RepartidorId { get; set; }
+        public string? RepartidorNombre { get; set; }
     }
 }
